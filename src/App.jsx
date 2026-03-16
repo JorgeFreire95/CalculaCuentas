@@ -21,11 +21,11 @@ export default function App() {
   const [tipPercentage, setTipPercentage] = useState(10);
   const [customTip, setCustomTip] = useState('');
 
-  // Modal for asking quantity
+  // Modal for assigning to multiple people (per item)
+  const [selectedPeopleByItem, setSelectedPeopleByItem] = useState({});
+  const [multiAssignItemId, setMultiAssignItemId] = useState(null);
+  const [multiQuantities, setMultiQuantities] = useState({});
   const [showQuantityModal, setShowQuantityModal] = useState(false);
-  const [modalItemId, setModalItemId] = useState(null);
-  const [modalPersonId, setModalPersonId] = useState(null);
-  const [modalQuantity, setModalQuantity] = useState(1);
 
   // OCR Worker Optimization
   const workerRef = useRef(null);
@@ -255,60 +255,94 @@ export default function App() {
     }));
   };
 
-  const toggleConsumer = (itemId, personId) => {
-    setScannedItems(scannedItems.map(item => {
-      if (item.id !== itemId) return item;
-
-      const counts = { ...(item.consumerCounts || {}) };
-      const totalAssigned = Object.values(counts).reduce((sum, v) => sum + v, 0);
-
-      if (counts[personId]) {
-        delete counts[personId];
+  const toggleSelection = (itemId, personId) => {
+    setSelectedPeopleByItem(prev => {
+      const current = new Set(prev[itemId] || []);
+      if (current.has(personId)) {
+        current.delete(personId);
       } else {
-        // Only allow selecting another person if there are remaining units
-        if (totalAssigned >= item.qty) return item;
-
-        const maxAllowed = item.qty - totalAssigned;
-
-        // Ask how many units this person consumed (only when quantity > 1)
-        if (item.qty > 1) {
-          // Show modal instead of prompt
-          setModalItemId(itemId);
-          setModalPersonId(personId);
-          setModalQuantity(1); // default
-          setShowQuantityModal(true);
-          return item; // Don't update yet, wait for modal
-        } else {
-          counts[personId] = 1;
-        }
+        current.add(personId);
       }
+      return { ...prev, [itemId]: current };
+    });
+  };
 
-      const newConsumers = Object.keys(counts);
-      return { ...item, consumers: newConsumers, consumerCounts: counts };
-    }));
+  const assignToSelected = (itemId) => {
+    const item = scannedItems.find(i => i.id === itemId);
+    const selectedPeople = selectedPeopleByItem[itemId] || new Set();
+    if (!item || selectedPeople.size === 0) return;
+
+    setMultiAssignItemId(itemId);
+    const initialQuantities = {};
+    selectedPeople.forEach(id => {
+      initialQuantities[id] = 1; // default
+    });
+    setMultiQuantities(initialQuantities);
+    setShowQuantityModal(true); // reuse modal
   };
 
   const confirmQuantityModal = () => {
-    if (!modalItemId || !modalPersonId) return;
+    if (multiAssignItemId) {
+      // Multi assign
+      const item = scannedItems.find(i => i.id === multiAssignItemId);
+      if (!item) return;
 
-    const item = scannedItems.find(i => i.id === modalItemId);
-    if (!item) return;
+      const counts = { ...(item.consumerCounts || {}) };
+      const totalAssigned = Object.values(counts).reduce((sum, v) => sum + v, 0);
+      const maxAllowed = item.qty - totalAssigned;
 
-    const counts = { ...(item.consumerCounts || {}) };
-    const totalAssigned = Object.values(counts).reduce((sum, v) => sum + v, 0);
-    const maxAllowed = item.qty - totalAssigned;
-    const count = Math.max(1, Math.min(maxAllowed, modalQuantity));
+      let sumQuantities = 0;
+      const newQuantities = {};
+      Object.entries(multiQuantities).forEach(([id, qty]) => {
+        const clamped = Math.max(0.01, Math.min(maxAllowed - sumQuantities, qty));
+        newQuantities[id] = clamped;
+        sumQuantities += clamped;
+      });
 
-    counts[modalPersonId] = count;
-    const newConsumers = Object.keys(counts);
+      // If sum exceeds, scale down
+      if (sumQuantities > maxAllowed) {
+        const scale = maxAllowed / sumQuantities;
+        Object.keys(newQuantities).forEach(id => {
+          newQuantities[id] *= scale;
+        });
+      }
 
-    setScannedItems(scannedItems.map(i =>
-      i.id === modalItemId ? { ...i, consumers: newConsumers, consumerCounts: counts } : i
-    ));
+      Object.entries(newQuantities).forEach(([id, qty]) => {
+        counts[id] = qty;
+      });
 
-    setShowQuantityModal(false);
-    setModalItemId(null);
-    setModalPersonId(null);
+      const newConsumers = Object.keys(counts);
+      setScannedItems(scannedItems.map(i =>
+        i.id === multiAssignItemId ? { ...i, consumers: newConsumers, consumerCounts: counts } : i
+      ));
+
+      setShowQuantityModal(false);
+      setMultiAssignItemId(null);
+      setMultiQuantities({});
+      setSelectedPeopleByItem(prev => ({ ...prev, [multiAssignItemId]: new Set() }));
+    } else {
+      // Single assign (old logic, but updated)
+      if (!modalItemId || !modalPersonId) return;
+
+      const item = scannedItems.find(i => i.id === modalItemId);
+      if (!item) return;
+
+      const counts = { ...(item.consumerCounts || {}) };
+      const totalAssigned = Object.values(counts).reduce((sum, v) => sum + v, 0);
+      const maxAllowed = item.qty - totalAssigned;
+      const count = Math.max(0.01, Math.min(maxAllowed, modalQuantity));
+
+      counts[modalPersonId] = count;
+      const newConsumers = Object.keys(counts);
+
+      setScannedItems(scannedItems.map(i =>
+        i.id === modalItemId ? { ...i, consumers: newConsumers, consumerCounts: counts } : i
+      ));
+
+      setShowQuantityModal(false);
+      setModalItemId(null);
+      setModalPersonId(null);
+    }
   };
   
 
@@ -327,7 +361,7 @@ export default function App() {
     // Initialize all debts to 0
     let debts = {};
     people.forEach(p => {
-      debts[p.id] = { name: p.name, baseShare: 0, personTip: 0, totalToPay: 0 };
+      debts[p.id] = { name: p.name, baseShare: 0, personTip: 0, totalToPay: 0, consumptions: [] };
     });
 
     // Subtotal of prices assigned to people (vs unassigned noise)
@@ -348,7 +382,14 @@ export default function App() {
 
         Object.entries(counts).forEach(([personId, count]) => {
           if (debts[personId]) {
-            debts[personId].baseShare += unitPrice * count * scale;
+            const scaledCount = count * scale;
+            const cost = unitPrice * scaledCount;
+            debts[personId].baseShare += cost;
+            debts[personId].consumptions.push({
+              itemName: item.name,
+              qty: scaledCount,
+              cost: cost
+            });
           }
         });
       }
@@ -542,18 +583,32 @@ export default function App() {
                     {people.map((person) => {
                       const count = item.consumerCounts?.[person.id] ?? 0;
                       const isActive = count > 0;
+                      const selectedForItem = selectedPeopleByItem[item.id] || new Set();
+                      const isSelected = selectedForItem.has(person.id);
                       return (
-                        <button
-                          key={person.id}
-                          className={`person-badge ${isActive ? 'active' : ''}`}
-                          onClick={() => toggleConsumer(item.id, person.id)}
-                          style={{ minWidth: '90px' }}
-                        >
-                          {person.name} {isActive ? `(${count})` : ''}
-                        </button>
+                        <label key={person.id} style={{ display: 'flex', alignItems: 'center', gap: '5px', minWidth: '90px' }}>
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={() => toggleSelection(item.id, person.id)}
+                            disabled={isActive} // Can't select if already assigned
+                          />
+                          <span className={`person-badge ${isActive ? 'active' : ''}`} style={{ cursor: 'pointer', flex: 1 }}>
+                            {person.name} {isActive ? `(${count % 1 === 0 ? count : count.toFixed(1)})` : ''}
+                          </span>
+                        </label>
                       );
                     })}
                   </div>
+                  {selectedPeopleByItem[item.id] && selectedPeopleByItem[item.id].size > 0 && remaining > 0 && (
+                    <button
+                      className="small-button"
+                      style={{ marginTop: '10px' }}
+                      onClick={() => assignToSelected(item.id)}
+                    >
+                      Asignar a {selectedPeopleByItem[item.id].size} persona{selectedPeopleByItem[item.id].size > 1 ? 's' : ''}
+                    </button>
+                  )}
                 </div>
               );
             })
@@ -569,45 +624,97 @@ export default function App() {
         </button>
 
         {showQuantityModal && (() => {
-          const item = scannedItems.find(i => i.id === modalItemId);
-          const person = people.find(p => p.id === modalPersonId);
-          const totalAssigned = item ? Object.values(item.consumerCounts || {}).reduce((sum, v) => sum + v, 0) : 0;
-          const maxAllowed = item ? Math.max(1, item.qty - totalAssigned) : 1;
+          if (multiAssignItemId) {
+            const item = scannedItems.find(i => i.id === multiAssignItemId);
+            const totalAssigned = item ? Object.values(item.consumerCounts || {}).reduce((sum, v) => sum + v, 0) : 0;
+            const maxAllowed = item ? Math.max(0, item.qty - totalAssigned) : 0;
 
-          return (
-            <div className="modal-overlay">
-              <div className="modal-content">
-                <h2>¿Cuántos {item?.name ?? 'items'} consumió {person?.name ?? 'esta persona'}?</h2>
-                <p>Máx {maxAllowed}</p>
+            return (
+              <div className="modal-overlay">
+                <div className="modal-content">
+                  <h2>Asignar {item?.name ?? 'items'} a {selectedPeopleByItem[multiAssignItemId]?.size ?? 0} persona{(selectedPeopleByItem[multiAssignItemId]?.size || 0) > 1 ? 's' : ''}</h2>
+                  <p>Total restante: {maxAllowed % 1 === 0 ? maxAllowed : maxAllowed.toFixed(1)}</p>
 
-                <input
-                  type="number"
-                  min={1}
-                  max={maxAllowed}
-                  value={modalQuantity}
-                  onChange={(e) => setModalQuantity(Number(e.target.value))}
-                  className="std-input"
-                  style={{ marginTop: '10px' }}
-                />
+                  {Array.from(selectedPeopleByItem[multiAssignItemId] || []).map(personId => {
+                    const person = people.find(p => p.id === personId);
+                    return (
+                      <div key={personId} style={{ marginTop: '10px' }}>
+                        <label>{person?.name ?? 'Persona'}: </label>
+                        <input
+                          type="number"
+                          min={0.01}
+                          step={0.01}
+                          value={multiQuantities[personId] || 1}
+                          onChange={(e) => setMultiQuantities(prev => ({ ...prev, [personId]: Number(e.target.value) }))}
+                          className="std-input"
+                          style={{ width: '100px', marginLeft: '10px' }}
+                        />
+                      </div>
+                    );
+                  })}
 
-                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '20px' }}>
-                  <button
-                    className="outline-button"
-                    onClick={() => {
-                      setShowQuantityModal(false);
-                      setModalItemId(null);
-                      setModalPersonId(null);
-                    }}
-                  >
-                    Cancelar
-                  </button>
-                  <button className="primary-button" onClick={confirmQuantityModal}>
-                    Guardar
-                  </button>
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '20px' }}>
+                    <button
+                      className="outline-button"
+                      onClick={() => {
+                        setShowQuantityModal(false);
+                        setMultiAssignItemId(null);
+                        setMultiQuantities({});
+                        setSelectedPeopleByItem(prev => ({ ...prev, [multiAssignItemId]: new Set() }));
+                      }}
+                    >
+                      Cancelar
+                    </button>
+                    <button className="primary-button" onClick={confirmQuantityModal}>
+                      Asignar
+                    </button>
+                  </div>
                 </div>
               </div>
-            </div>
-          );
+            );
+          } else {
+            // Single assign
+            const item = scannedItems.find(i => i.id === modalItemId);
+            const person = people.find(p => p.id === modalPersonId);
+            const totalAssigned = item ? Object.values(item.consumerCounts || {}).reduce((sum, v) => sum + v, 0) : 0;
+            const maxAllowed = item ? Math.max(0.01, item.qty - totalAssigned) : 0.01;
+
+            return (
+              <div className="modal-overlay">
+                <div className="modal-content">
+                  <h2>¿Cuántos {item?.name ?? 'items'} consumió {person?.name ?? 'esta persona'}?</h2>
+                  <p>Máx {maxAllowed % 1 === 0 ? maxAllowed : maxAllowed.toFixed(1)}</p>
+
+                  <input
+                    type="number"
+                    min={0.01}
+                    max={maxAllowed}
+                    step={0.01}
+                    value={modalQuantity}
+                    onChange={(e) => setModalQuantity(Number(e.target.value))}
+                    className="std-input"
+                    style={{ marginTop: '10px' }}
+                  />
+
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '20px' }}>
+                    <button
+                      className="outline-button"
+                      onClick={() => {
+                        setShowQuantityModal(false);
+                        setModalItemId(null);
+                        setModalPersonId(null);
+                      }}
+                    >
+                      Cancelar
+                    </button>
+                    <button className="primary-button" onClick={confirmQuantityModal}>
+                      Guardar
+                    </button>
+                  </div>
+                </div>
+              </div>
+            );
+          }
         })()}
       </div>
     );
@@ -688,6 +795,16 @@ export default function App() {
               </div>
               <div className="result-detail">Consumo + Compartido: ${person.baseShare.toFixed(0)}</div>
               <div className="result-detail">Propina: ${person.personTip.toFixed(0)}</div>
+              {person.consumptions.length > 0 && (
+                <div className="result-detail" style={{ marginTop: '10px', fontSize: '12px' }}>
+                  <strong>Detalle de consumo:</strong>
+                  {person.consumptions.map((cons, j) => (
+                    <div key={j} style={{ marginLeft: '10px' }}>
+                      {cons.qty % 1 === 0 ? cons.qty : cons.qty.toFixed(1)}x {cons.itemName}: ${cons.cost.toFixed(0)}
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           ))}
         </div>
