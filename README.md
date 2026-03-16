@@ -1,12 +1,12 @@
-# CalculaCuentas 📱💸
+# PagoJusto 📱💸
 
-CalculaCuentas es una aplicación móvil moderna, diseñada para dispositivos Android y entornos Web, que revoluciona la forma en que divides la cuenta de un restaurante, pub o bar con tus amigos. Gracias a la inteligencia artificial, elimina las matemáticas engorrosas y los cálculos injustos al permitir leer tu boleta directamente con la cámara.
+PagoJusto es una aplicación móvil moderna, diseñada para dispositivos Android y entornos Web, que revoluciona la forma en que divides la cuenta de un restaurante, pub o bar con tus amigos. Gracias a la inteligencia artificial, elimina las matemáticas engorrosas y los cálculos injustos al permitir leer tu boleta directamente con la cámara.
 
-![CalculaCuentas](/assets/neon-dark-theme-preview.png) *(Imagina un diseño oscuro, elegante y con toques en verde neón vibrante)*
+![PagoJusto](/assets/neon-dark-theme-preview.png) *(Imagina un diseño oscuro, elegante y con toques en verde neón vibrante)*
 
 ## ✨ Funcionalidades Principales
 
-CalculaCuentas funciona a través de un flujo intuitivo de 6 pasos:
+PagoJusto funciona a través de un flujo intuitivo de 6 pasos:
 
 1. 👥 **Registro de Asistentes**: Antes de empezar, ingresa rápidamente los nombres de todas las personas que compartirán la cuenta.
 2. 📸 **Escáner Inteligente (OCR)**: Usa la cámara de tu teléfono para fotografiar la boleta. La aplicación la analizará en segundo plano extrayendo los productos y sus precios usando Inteligencia Artificial.
@@ -40,8 +40,8 @@ Si deseas clonar y correr este proyecto de manera local para desarrollo:
 
 ### 1. Clonar el proyecto y descargar dependencias
 ```bash
-git clone https://github.com/tu-usuario/calculacuentas.git
-cd calculacuentas
+git clone https://github.com/tu-usuario/pagojusto.git
+cd pagojusto
 npm install
 ```
 

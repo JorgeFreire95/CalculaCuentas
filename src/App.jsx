@@ -14,6 +14,12 @@ export default function App() {
   // Validation step inputs
   const [newItemName, setNewItemName] = useState('');
   const [newItemPrice, setNewItemPrice] = useState('');
+  const [parsedQty, setParsedQty] = useState(1);
+  const [previewUnitPrice, setPreviewUnitPrice] = useState(0);
+
+  // Tip / propina
+  const [tipPercentage, setTipPercentage] = useState(10);
+  const [customTip, setCustomTip] = useState('');
 
   // Modal for asking quantity
   const [showQuantityModal, setShowQuantityModal] = useState(false);
@@ -167,6 +173,28 @@ export default function App() {
   };
 
   // ---------- STEP 3: Validate Items ----------
+  const handleNameChange = (value) => {
+    setNewItemName(value);
+    // Parse quantity from name
+    let qty = 1;
+    const qtyMatch = value.match(/^(\d+)\s*[xX*]?\s+/);
+    if (qtyMatch) {
+      qty = parseInt(qtyMatch[1], 10) || 1;
+    }
+    setParsedQty(qty);
+    // Recalculate unit price if price is set
+    if (newItemPrice) {
+      const totalPrice = parseFloat(newItemPrice);
+      setPreviewUnitPrice(qty > 1 ? totalPrice / qty : totalPrice);
+    }
+  };
+
+  const handlePriceChange = (value) => {
+    setNewItemPrice(value);
+    const totalPrice = parseFloat(value) || 0;
+    setPreviewUnitPrice(totalPrice / parsedQty);
+  };
+
   const handleAddItem = () => {
     if (newItemName.trim() && parseFloat(newItemPrice) > 0) {
       // Parse manual quantity if they write "2x Bebidas"
@@ -178,8 +206,8 @@ export default function App() {
         name = name.replace(/^(\d+)\s*[xX*]?\s+/, '').trim();
       }
 
-      const unitPrice = parseFloat(newItemPrice);
-      const totalPrice = qty > 1 ? unitPrice * qty : unitPrice;
+      const totalPrice = parseFloat(newItemPrice);
+      const unitPrice = totalPrice / qty;
 
       setScannedItems([...scannedItems, {
         id: Date.now().toString(),
@@ -192,6 +220,8 @@ export default function App() {
       }]);
       setNewItemName('');
       setNewItemPrice('');
+      setParsedQty(1);
+      setPreviewUnitPrice(0);
     }
   };
 
@@ -280,34 +310,7 @@ export default function App() {
     setModalItemId(null);
     setModalPersonId(null);
   };
-    setScannedItems(scannedItems.map(item => {
-      if (item.id === itemId) {
-        // Distribute units among people: 1 each round-robin until we run out
-        const counts = {};
-        let remaining = item.qty;
-
-        // First, give 1 unit to as many people as possible (up to qty)
-        people.forEach((p) => {
-          if (remaining > 0) {
-            counts[p.id] = 1;
-            remaining -= 1;
-          }
-        });
-
-        // If we still have remaining units, keep distributing round-robin
-        let idx = 0;
-        while (remaining > 0 && people.length > 0) {
-          const person = people[idx % people.length];
-          counts[person.id] = (counts[person.id] || 0) + 1;
-          remaining -= 1;
-          idx += 1;
-        }
-
-        return { ...item, consumers: Object.keys(counts), consumerCounts: counts };
-      }
-      return item;
-    }));
-  };
+  
 
   // ---------- Calculation ----------
   const calculateFinalResults = () => {
@@ -449,20 +452,25 @@ export default function App() {
               style={{ flex: 2 }}
               type="text"
               value={newItemName}
-              onChange={(e) => setNewItemName(e.target.value)}
-              placeholder="Ej: 2 Bebidas"
+              onChange={(e) => handleNameChange(e.target.value)}
+              placeholder="Ej: 6 Mojitos"
             />
             <input
               className="std-input"
               style={{ flex: 1 }}
               type="number"
               value={newItemPrice}
-              onChange={(e) => setNewItemPrice(e.target.value)}
-              placeholder="$ Precio"
+              onChange={(e) => handlePriceChange(e.target.value)}
+              placeholder="$ Precio total"
               onKeyDown={(e) => e.key === 'Enter' && handleAddItem()}
             />
             <button className="small-button" style={{ marginLeft: 0}} onClick={handleAddItem}>+</button>
           </div>
+          {newItemPrice && (
+            <p style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '5px', marginBottom: '10px' }}>
+              Precio unitario: ${previewUnitPrice.toFixed(0)} c/u
+            </p>
+          )}
 
           <div className="list-container flex-1">
             {scannedItems.length === 0 && (
@@ -474,11 +482,9 @@ export default function App() {
                   <span className="person-name">{item.qty > 1 ? `${item.qty}x ` : ''}{item.name}</span>
                   <br/>
                   <span style={{color: 'var(--primary)', fontWeight: 'bold'}}>${item.price.toFixed(0)} total</span>
-                  {item.qty > 1 && (
-                    <span style={{color: 'var(--text-secondary)', fontSize: '12px', marginLeft: '10px'}}>
-                      (${ (item.unitPrice ?? (item.price / item.qty)).toFixed(0) } c/u)
-                    </span>
-                  )}
+                  <span style={{color: 'var(--text-secondary)', fontSize: '12px', marginLeft: '10px'}}>
+                    (${item.unitPrice.toFixed(0)} c/u)
+                  </span>
                 </div>
                 <button className="icon-button danger" onClick={() => handleRemoveItem(item.id)}>✕</button>
               </div>
@@ -501,6 +507,111 @@ export default function App() {
   );
 
 
+
+  const renderStep4 = () => {
+    return (
+      <div className="step-container">
+        <h1 className="title">Asignar Consumo</h1>
+        <p className="subtitle">Selecciona a una persona para registrar cuántas unidades consumió.</p>
+
+        <div className="list-container flex-1">
+          {scannedItems.length === 0 ? (
+            <p style={{textAlign: 'center', color: 'var(--text-secondary)', padding: '20px'}}>No hay productos para asignar.</p>
+          ) : (
+            scannedItems.map((item) => {
+              const totalAssigned = Object.values(item.consumerCounts || {}).reduce((sum, v) => sum + v, 0);
+              const remaining = Math.max(0, item.qty - totalAssigned);
+
+              return (
+                <div key={item.id} className="consumption-card">
+                  <div style={{ flex: 1 }}>
+                    <span className="person-name">{item.qty > 1 ? `${item.qty}x ` : ''}{item.name}</span>
+                    <br />
+                    <span style={{color: 'var(--primary)', fontWeight: 'bold'}}>${item.price.toFixed(0)} total</span>
+                    {item.qty > 1 && (
+                      <span style={{color: 'var(--text-secondary)', fontSize: '12px', marginLeft: '10px'}}>
+                        (${ (item.unitPrice ?? (item.price / item.qty)).toFixed(0) } c/u)
+                      </span>
+                    )}
+                    <div style={{marginTop: '8px', fontSize: '12px', color: 'var(--text-secondary)'}}>
+                      Asignado: {totalAssigned} / {item.qty} {remaining > 0 ? `(${remaining} restantes)` : '(completo)'}
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginTop: '12px' }}>
+                    {people.map((person) => {
+                      const count = item.consumerCounts?.[person.id] ?? 0;
+                      const isActive = count > 0;
+                      return (
+                        <button
+                          key={person.id}
+                          className={`person-badge ${isActive ? 'active' : ''}`}
+                          onClick={() => toggleConsumer(item.id, person.id)}
+                          style={{ minWidth: '90px' }}
+                        >
+                          {person.name} {isActive ? `(${count})` : ''}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
+
+        <button
+          className="primary-button"
+          disabled={scannedItems.length === 0}
+          onClick={() => setStep(5)}
+        >
+          Siguiente
+        </button>
+
+        {showQuantityModal && (() => {
+          const item = scannedItems.find(i => i.id === modalItemId);
+          const person = people.find(p => p.id === modalPersonId);
+          const totalAssigned = item ? Object.values(item.consumerCounts || {}).reduce((sum, v) => sum + v, 0) : 0;
+          const maxAllowed = item ? Math.max(1, item.qty - totalAssigned) : 1;
+
+          return (
+            <div className="modal-overlay">
+              <div className="modal-content">
+                <h2>¿Cuántos {item?.name ?? 'items'} consumió {person?.name ?? 'esta persona'}?</h2>
+                <p>Máx {maxAllowed}</p>
+
+                <input
+                  type="number"
+                  min={1}
+                  max={maxAllowed}
+                  value={modalQuantity}
+                  onChange={(e) => setModalQuantity(Number(e.target.value))}
+                  className="std-input"
+                  style={{ marginTop: '10px' }}
+                />
+
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '20px' }}>
+                  <button
+                    className="outline-button"
+                    onClick={() => {
+                      setShowQuantityModal(false);
+                      setModalItemId(null);
+                      setModalPersonId(null);
+                    }}
+                  >
+                    Cancelar
+                  </button>
+                  <button className="primary-button" onClick={confirmQuantityModal}>
+                    Guardar
+                  </button>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
+      </div>
+    );
+  };
 
   const renderStep5 = () => (
     <div className="step-container">
@@ -600,7 +711,7 @@ export default function App() {
   return (
     <div className="app-layout">
       <header className="header">
-        <h1 className="header-brand">CalculaCuentas</h1>
+        <h1 className="header-brand">PagoJusto</h1>
         {step > 1 && step < 6 && (
           <button className="back-button" onClick={() => setStep(step === 3 && scannedItems.length > 0 && !isScanning ? 3 : step - 1)}>
             ← Volver
@@ -612,11 +723,11 @@ export default function App() {
         {step === 1 && renderStep1()}
         {step === 2 && renderStep2()}
         {step === 3 && renderStep3()}
-        {step === 4 && <div>Step 4</div>}
+        {step === 4 && renderStep4()}
         {step === 5 && renderStep5()}
         {step === 6 && renderStep6()}
       </main>
     </div>
   );
-  g
+}
 
